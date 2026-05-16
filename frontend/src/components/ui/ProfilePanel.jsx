@@ -19,11 +19,17 @@ export function ProfilePanel() {
       </div>
       <div className="mt-5 grid gap-3 text-sm md:grid-cols-2">
         <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">Employee Code</span><strong className="block">{user?.employee_code}</strong></div>
+        <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">User ID</span><strong className="block">{user?.employee_code || user?.id}</strong></div>
         <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">Role</span><strong className="block">{user?.role}</strong></div>
         <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">Department</span><strong className="block">{user?.department?.name || 'Unassigned'}</strong></div>
         <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">Phone</span><strong className="block">{user?.phone_number || 'Not provided'}</strong></div>
         <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">Joining Date</span><strong className="block">{user?.joining_date || 'Not provided'}</strong></div>
         <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">Last Login</span><strong className="block">{user?.last_login || 'Not tracked'}</strong></div>
+        <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">Address Line</span><strong className="block">{user?.address || 'Not provided'}</strong></div>
+        <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">City</span><strong className="block">{user?.city || 'Not provided'}</strong></div>
+        <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">District</span><strong className="block">{user?.district || 'Not provided'}</strong></div>
+        <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">State</span><strong className="block">{user?.state || 'Not provided'}</strong></div>
+        <div className="rounded-lg bg-slate-50 p-3"><span className="text-slate-500">Pincode</span><strong className="block">{user?.pincode || 'Not provided'}</strong></div>
       </div>
     </section>
   );

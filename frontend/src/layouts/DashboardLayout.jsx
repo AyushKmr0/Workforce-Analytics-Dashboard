@@ -4,7 +4,8 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { employeeService } from '../services/employeeService';
-import { Modal } from '../components/ui/Modal';
+import { adminService } from '../services/adminService';
+import { hrService } from '../services/hrService';
 
 function dashboardPath(role) {
   if (role === 'ADMIN') return '/admin';
@@ -29,15 +30,16 @@ function accountPath(role, section) {
   return `${base}/${section}`;
 }
 
-function navLinks(role) {
+function navLinks(role, counts = {}) {
   if (role === 'ADMIN') {
     return [
       { to: '/admin', label: 'Analysis', icon: BarChart3 },
       { to: '/admin/people', label: 'People', icon: Users },
       { to: '/admin/attendance', label: 'Attendance', icon: CalendarCheck },
+      { to: '/admin/team-reports', label: 'Team Reports', icon: ClipboardList },
       { to: '/admin/documents', label: 'Documents', icon: FolderOpen },
       { to: '/admin/leaves', label: 'Leaves', icon: ClipboardList },
-      { to: '/admin/profile-requests', label: 'Approvals', icon: ShieldCheck },
+      { to: '/admin/profile-requests', label: 'Approvals', icon: ShieldCheck, badge: counts.approvals },
     ];
   }
   if (role === 'HR') {
@@ -48,7 +50,7 @@ function navLinks(role) {
       { to: '/hr/team-reports', label: 'Team Reports', icon: ClipboardList },
       { to: '/hr/documents', label: 'Documents', icon: FolderOpen },
       { to: '/hr/leaves', label: 'Leaves', icon: FileText },
-      { to: '/hr/profile-requests', label: 'Approvals', icon: ShieldCheck },
+      { to: '/hr/profile-requests', label: 'Approvals', icon: ShieldCheck, badge: counts.approvals },
     ];
   }
   return [
@@ -66,9 +68,8 @@ export function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024);
   const [attendanceBusy, setAttendanceBusy] = useState('');
   const [attendance, setAttendance] = useState(null);
-  const [attendancePrompt, setAttendancePrompt] = useState(null);
-  const [attendancePassword, setAttendancePassword] = useState('');
-  const links = navLinks(user?.role);
+  const [pendingCounts, setPendingCounts] = useState({});
+  const links = navLinks(user?.role, pendingCounts);
   const accountLinks = [
     { to: accountPath(user?.role, 'profile'), label: 'Profile', icon: UserRound },
     { to: accountPath(user?.role, 'edit-profile'), label: 'Edit Profile', icon: UserCog },
@@ -92,6 +93,44 @@ export function DashboardLayout() {
     return () => window.removeEventListener('attendance-updated', loadTodayAttendance);
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    const loadPendingCounts = async () => {
+      try {
+        if (user?.role === 'ADMIN') {
+          const approvals = await adminService.profileChangeRequests();
+          if (active) {
+            const items = approvals.items || [];
+            setPendingCounts({ approvals: unseenApprovalCount('ADMIN', items), approvalIds: approvalIds(items) });
+          }
+        } else if (user?.role === 'HR') {
+          const approvals = await hrService.profileChangeRequests();
+          if (active) {
+            const items = approvals.items || [];
+            setPendingCounts({ approvals: unseenApprovalCount('HR', items), approvalIds: approvalIds(items) });
+          }
+        } else if (active) {
+          setPendingCounts({});
+        }
+      } catch {
+        if (active) setPendingCounts({});
+      }
+    };
+    loadPendingCounts();
+    const timer = window.setInterval(loadPendingCounts, 60000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [user?.role]);
+
+  useEffect(() => {
+    if (location.pathname.endsWith('/profile-requests') && user?.role) {
+      localStorage.setItem(`ems_seen_approvals_${user.role}`, JSON.stringify(pendingCounts.approvalIds || []));
+      setPendingCounts((counts) => ({ ...counts, approvals: 0 }));
+    }
+  }, [location.pathname, pendingCounts.approvalIds, user?.role]);
+
   const hasCheckedIn = Boolean(attendance?.check_in);
   const hasCheckedOut = Boolean(attendance?.check_out);
   const isCheckedIn = hasCheckedIn && !hasCheckedOut;
@@ -100,42 +139,18 @@ export function DashboardLayout() {
     ? 'Checked in - Active'
     : hasCompletedToday
       ? 'Checked out - Inactive'
-      : 'Not checked in - Locked';
-  const canCheckIn = !attendanceBusy && !isCheckedIn;
+      : 'Automatic check-in pending';
   const canCheckOut = !attendanceBusy && isCheckedIn;
 
-  const openAttendancePrompt = (action) => {
-    setAttendancePassword('');
-    setAttendancePrompt(action);
-  };
-
-  const closeAttendancePrompt = () => {
-    if (!attendanceBusy) {
-      setAttendancePrompt(null);
-      setAttendancePassword('');
-    }
-  };
-
-  const markAttendance = async (event) => {
-    event.preventDefault();
-    const action = attendancePrompt;
-    if (!action) return;
-    setAttendanceBusy(action);
+  const markCheckOut = async () => {
+    setAttendanceBusy('check-out');
     try {
-      if (action === 'check-in') {
-        const data = await employeeService.checkIn({ password: attendancePassword });
-        setAttendance(data.attendance);
-        showToast('Checked in successfully.');
-      } else {
-        const data = await employeeService.checkOut({ password: attendancePassword });
-        setAttendance(data.attendance);
-        showToast('Checked out successfully.');
-      }
-      setAttendancePrompt(null);
-      setAttendancePassword('');
+      const data = await employeeService.checkOut();
+      setAttendance(data.attendance);
+      showToast('Checked out successfully.');
       window.dispatchEvent(new Event('attendance-updated'));
     } catch (error) {
-      showToast(error.response?.data?.message || 'Attendance action failed.', 'error');
+      showToast(error.response?.data?.message || 'Check-out failed.', 'error');
     } finally {
       setAttendanceBusy('');
     }
@@ -209,18 +224,9 @@ export function DashboardLayout() {
           </div>
           <div className="flex flex-wrap justify-end gap-2">
             <button
-              className="btn-primary px-3 py-2"
-              disabled={!canCheckIn}
-              onClick={() => openAttendancePrompt('check-in')}
-              title={hasCompletedToday ? 'Check in again to unlock your workspace.' : undefined}
-              type="button"
-            >
-              {attendanceBusy === 'check-in' ? 'Checking...' : 'Check In'}
-            </button>
-            <button
               className="btn-secondary px-3 py-2"
               disabled={!canCheckOut}
-              onClick={() => openAttendancePrompt('check-out')}
+              onClick={markCheckOut}
               type="button"
             >
               {attendanceBusy === 'check-out' ? 'Checking...' : 'Check Out'}
@@ -232,49 +238,9 @@ export function DashboardLayout() {
           </div>
         </header>
         <div className="p-5 lg:p-8">
-          {!isCheckedIn && (
-            <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-              {hasCompletedToday
-                ? 'You are checked out. Check in again to unlock your workspace.'
-                : 'Check-in is required. Until today\'s check-in is complete, the workspace will remain blank and locked.'}
-            </div>
-          )}
-          {isCheckedIn ? <Outlet context={{ canWork: isCheckedIn, attendance }} /> : <LockedWorkspace />}
+          <Outlet context={{ canWork: isCheckedIn, attendance }} />
         </div>
       </main>
-      {attendancePrompt && (
-        <Modal
-          title={attendancePrompt === 'check-in' ? 'Confirm Check In' : 'Confirm Check Out'}
-          onClose={closeAttendancePrompt}
-          footer={(
-            <>
-              <button className="btn-secondary" onClick={closeAttendancePrompt} disabled={Boolean(attendanceBusy)} type="button">
-                Cancel
-              </button>
-              <button className="btn-primary" form="attendance-password-form" disabled={Boolean(attendanceBusy) || !attendancePassword}>
-                {attendanceBusy === attendancePrompt ? 'Confirming...' : 'Confirm'}
-              </button>
-            </>
-          )}
-        >
-          <form className="grid gap-4" id="attendance-password-form" onSubmit={markAttendance}>
-            <p className="text-sm font-semibold text-slate-600">
-              Enter your password to {attendancePrompt === 'check-in' ? 'check in' : 'check out'}.
-            </p>
-            <label className="grid gap-1.5 text-sm font-semibold text-slate-700">
-              <span>Password</span>
-              <input
-                autoFocus
-                className="field"
-                type="password"
-                value={attendancePassword}
-                onChange={(event) => setAttendancePassword(event.target.value)}
-                required
-              />
-            </label>
-          </form>
-        </Modal>
-      )}
     </div>
   );
 }
@@ -289,38 +255,28 @@ function SidebarLink({ item, active, expanded }) {
       title={!expanded ? item.label : undefined}
     >
       <item.icon size={18} />
-      {expanded && <span>{item.label}</span>}
+      {expanded && <span className="min-w-0 flex-1">{item.label}</span>}
+      {Boolean(item.badge) && (
+        <span className="h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
+      )}
     </Link>
   );
 }
 
-function LockedWorkspace() {
-  return (
-    <div className="space-y-6">
-      <section className="card p-6">
-        <div className="h-7 w-56 rounded-lg bg-slate-200" />
-        <div className="mt-2 h-4 w-80 max-w-full rounded-lg bg-slate-100" />
-      </section>
-      <div className="grid gap-4 md:grid-cols-3">
-        {[0, 1, 2].map((item) => (
-          <section className="card p-5" key={item}>
-            <div className="h-4 w-24 rounded-lg bg-slate-200" />
-            <div className="mt-4 h-8 w-20 rounded-lg bg-slate-100" />
-          </section>
-        ))}
-      </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        {[0, 1].map((item) => (
-          <section className="card p-5" key={item}>
-            <div className="h-5 w-40 rounded-lg bg-slate-200" />
-            <div className="mt-4 h-64 rounded-xl bg-slate-100" />
-          </section>
-        ))}
-      </div>
-      <section className="card p-5">
-        <div className="h-5 w-48 rounded-lg bg-slate-200" />
-        <div className="mt-4 h-72 rounded-xl bg-slate-100" />
-      </section>
-    </div>
-  );
+function unseenApprovalCount(role, items) {
+  const seen = new Set(readSeenApprovals(role));
+  return items.some((item) => !seen.has(item.id)) ? 1 : 0;
+}
+
+function approvalIds(items) {
+  return items.map((item) => item.id);
+}
+
+function readSeenApprovals(role) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(`ems_seen_approvals_${role}`) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }

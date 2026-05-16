@@ -1,4 +1,5 @@
 import { StatusBadge } from './StatusBadge';
+import { formatMoney } from '../../utils/format';
 
 export function EmployeeTable({ employees = [], onView, onEdit, onDelete }) {
   return (
@@ -23,12 +24,13 @@ export function EmployeeTable({ employees = [], onView, onEdit, onDelete }) {
                   <div>
                     <div className="font-semibold text-slate-950">{employee.name}</div>
                     <div className="text-slate-500">{employee.email}</div>
+                    <div className="text-xs font-bold text-slate-400">ID: {employee.employee_code || employee.id}</div>
                   </div>
                 </div>
               </td>
               <td className="px-4 py-4">{employee.department?.name || 'Unassigned'}</td>
               <td className="px-4 py-4">{employee.role}</td>
-              <td className="px-4 py-4">${Number(employee.salary || 0).toLocaleString()}</td>
+              <td className="px-4 py-4">{formatMoney(employee.salary)}</td>
               <td className="px-4 py-4"><StatusBadge value={employee.status} /></td>
               {(onView || onEdit || onDelete) && (
                 <td className="px-4 py-4">

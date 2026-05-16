@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, Upload } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useAsync } from '../../hooks/useAsync';
 import { employeeService } from '../../services/employeeService';
 import { StatusBadge } from './StatusBadge';
+import { Modal } from './Modal';
 
 export function ProfileChangePanel({ data, busyAction, onRefresh, onPreviewDocument, onDeleteDocument, activeTab = 'profile' }) {
   const { user, updateUser } = useAuth();
@@ -12,11 +13,16 @@ export function ProfileChangePanel({ data, busyAction, onRefresh, onPreviewDocum
   const [saving, setSaving] = useState('');
   const [avatar, setAvatar] = useState(null);
   const [documentFile, setDocumentFile] = useState(null);
+  const [confirmAction, setConfirmAction] = useState('');
   const [form, setForm] = useState({
     name: user?.name || '',
     email: user?.email || '',
     phone_number: user?.phone_number || '',
     address: user?.address || '',
+    city: user?.city || '',
+    district: user?.district || '',
+    state: user?.state || '',
+    pincode: user?.pincode || '',
     date_of_birth: user?.date_of_birth || '',
     joining_date: user?.joining_date || '',
   });
@@ -29,20 +35,55 @@ export function ProfileChangePanel({ data, busyAction, onRefresh, onPreviewDocum
   const profile = sourceData?.user || user;
   const documents = sourceData?.documents || [];
 
+  useEffect(() => {
+    setForm({
+      name: profile?.name || '',
+      email: profile?.email || '',
+      phone_number: profile?.phone_number || '',
+      address: profile?.address || '',
+      city: profile?.city || '',
+      district: profile?.district || '',
+      state: profile?.state || '',
+      pincode: profile?.pincode || '',
+      date_of_birth: profile?.date_of_birth || '',
+      joining_date: profile?.joining_date || '',
+    });
+  }, [
+    profile?.id,
+    profile?.name,
+    profile?.email,
+    profile?.phone_number,
+    profile?.address,
+    profile?.city,
+    profile?.district,
+    profile?.state,
+    profile?.pincode,
+    profile?.date_of_birth,
+    profile?.joining_date,
+  ]);
+
   const avatarPreview = useMemo(() => {
     if (avatar) return URL.createObjectURL(avatar);
     return profile?.profile_image || '';
   }, [avatar, profile?.profile_image]);
 
-  const submitProfile = async (event) => {
+  const requestProfileSave = (event) => {
     event.preventDefault();
+    setConfirmAction('profile');
+  };
+
+  const submitProfile = async () => {
     setSaving('profile');
     try {
       const payload = { ...form };
       if (avatar) payload.profile_image = avatar;
       const response = await employeeService.updateProfile(payload);
-      updateUser(response.user);
-      showToast('Profile updated directly.');
+      if (response.user) {
+        updateUser(response.user);
+        showToast('Profile updated.');
+      } else {
+        showToast(response.message || 'Profile change request submitted for approval.');
+      }
       setAvatar(null);
       if (avatarRef.current) avatarRef.current.value = '';
       onRefresh?.();
@@ -53,12 +94,16 @@ export function ProfileChangePanel({ data, busyAction, onRefresh, onPreviewDocum
     }
   };
 
-  const submitPassword = async (event) => {
+  const requestPasswordSave = (event) => {
     event.preventDefault();
     if (password.password !== password.confirm) {
       showToast('Password confirmation does not match.', 'error');
       return;
     }
+    setConfirmAction('password');
+  };
+
+  const submitPassword = async () => {
     setSaving('password');
     try {
       await employeeService.updatePassword({ password: password.password });
@@ -71,12 +116,16 @@ export function ProfileChangePanel({ data, busyAction, onRefresh, onPreviewDocum
     }
   };
 
-  const uploadDocument = async (event) => {
+  const requestDocumentUpload = (event) => {
     event.preventDefault();
     if (!documentFile) {
       showToast('Choose a document first.', 'info');
       return;
     }
+    setConfirmAction('document');
+  };
+
+  const uploadDocument = async () => {
     setSaving('document');
     try {
       await employeeService.uploadDocument(documentFile);
@@ -111,8 +160,8 @@ export function ProfileChangePanel({ data, busyAction, onRefresh, onPreviewDocum
 
       <div className="min-h-[440px]">
           {activeTab === 'profile' && (
-            <form className="grid gap-4" onSubmit={submitProfile}>
-              <SectionHeading title="Update Profile" subtitle="All profile fields save directly. Documents stay in their own tab." />
+            <form className="grid gap-4" onSubmit={requestProfileSave}>
+              <SectionHeading title="Update Profile" subtitle={approvalSubtitle(profile?.role)} />
               <div className="flex flex-wrap items-center gap-4 rounded-lg bg-slate-50 p-4">
                 <AvatarPreview src={avatarPreview} name={form.name} large />
                 <label className="btn-secondary">
@@ -126,12 +175,16 @@ export function ProfileChangePanel({ data, busyAction, onRefresh, onPreviewDocum
                 <Field label="Email" type="email" value={form.email} onChange={(value) => setForm({ ...form, email: value })} required />
                 <Field label="Phone" value={form.phone_number} onChange={(value) => setForm({ ...form, phone_number: value })} />
                 <Field label="Date of Birth" type="date" value={form.date_of_birth || ''} onChange={(value) => setForm({ ...form, date_of_birth: value })} />
-                <Field label="Joining Date" type="date" value={form.joining_date || ''} onChange={(value) => setForm({ ...form, joining_date: value })} />
                 <ReadOnly label="Role" value={profile?.role || '-'} />
+                <ReadOnly label="Joining Date" value={profile?.joining_date || '-'} />
                 <label className="grid gap-1.5 text-sm font-semibold text-slate-700 md:col-span-2">
-                  <span>Address</span>
+                  <span>Address Line</span>
                   <textarea className="field" rows="3" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} />
                 </label>
+                <Field label="City" value={form.city} onChange={(value) => setForm({ ...form, city: value })} />
+                <Field label="District" value={form.district} onChange={(value) => setForm({ ...form, district: value })} />
+                <Field label="State" value={form.state} onChange={(value) => setForm({ ...form, state: value })} />
+                <Field label="Pincode" value={form.pincode} onChange={(value) => setForm({ ...form, pincode: value })} />
               </div>
               <button className="btn-primary w-fit" disabled={Boolean(saving)}>
                 {saving === 'profile' ? 'Saving...' : 'Save Profile'}
@@ -142,7 +195,7 @@ export function ProfileChangePanel({ data, busyAction, onRefresh, onPreviewDocum
           {activeTab === 'documents' && (
             <div className="grid gap-4">
               <SectionHeading title="Documents" subtitle="Upload and view employee documents separately from profile updates." />
-              <form className="flex flex-wrap gap-3 rounded-lg bg-slate-50 p-4" onSubmit={uploadDocument}>
+              <form className="flex flex-wrap gap-3 rounded-lg bg-slate-50 p-4" onSubmit={requestDocumentUpload}>
                 <input ref={documentRef} className="field min-w-64 flex-1" type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" onChange={(event) => setDocumentFile(event.target.files?.[0] || null)} />
                 <button className="btn-primary" disabled={Boolean(saving) || Boolean(busyAction)}>
                   <Upload size={18} />
@@ -170,7 +223,7 @@ export function ProfileChangePanel({ data, busyAction, onRefresh, onPreviewDocum
           )}
 
           {activeTab === 'security' && (
-            <form className="max-w-xl space-y-4" onSubmit={submitPassword}>
+            <form className="max-w-xl space-y-4" onSubmit={requestPasswordSave}>
               <SectionHeading title="Security" subtitle="Password changes are saved directly without HR/Admin approval." />
               <Field label="New Password" type="password" value={password.password} onChange={(value) => setPassword({ ...password, password: value })} required />
               <Field label="Confirm Password" type="password" value={password.confirm} onChange={(value) => setPassword({ ...password, confirm: value })} required />
@@ -198,6 +251,32 @@ export function ProfileChangePanel({ data, busyAction, onRefresh, onPreviewDocum
             </div>
           )}
       </div>
+      {confirmAction && (
+        <Modal
+          title={confirmTitle(confirmAction)}
+          onClose={() => setConfirmAction('')}
+          footer={(
+            <>
+              <button className="btn-secondary" onClick={() => setConfirmAction('')} type="button">Cancel</button>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  const action = confirmAction;
+                  setConfirmAction('');
+                  if (action === 'profile') submitProfile();
+                  if (action === 'password') submitPassword();
+                  if (action === 'document') uploadDocument();
+                }}
+                type="button"
+              >
+                Confirm
+              </button>
+            </>
+          )}
+        >
+          <p className="text-sm font-semibold text-slate-600">{confirmMessage(confirmAction)}</p>
+        </Modal>
+      )}
     </section>
   );
 }
@@ -209,6 +288,24 @@ function SectionHeading({ title, subtitle }) {
       <p className="mt-1 text-sm font-medium text-slate-500">{subtitle}</p>
     </div>
   );
+}
+
+function approvalSubtitle(role) {
+  if (role === 'ADMIN') return 'Admin profile changes save directly. Password changes stay in Security.';
+  if (role === 'HR') return 'Profile changes are sent to Admin for approval. Password changes stay in Security.';
+  return 'Profile changes are sent to HR for approval. Password changes stay in Security.';
+}
+
+function confirmTitle(action) {
+  if (action === 'password') return 'Update Password';
+  if (action === 'document') return 'Upload Document';
+  return 'Submit Profile Update';
+}
+
+function confirmMessage(action) {
+  if (action === 'password') return 'Confirm password update for this account.';
+  if (action === 'document') return 'Confirm document upload.';
+  return 'Confirm profile update request. Password changes are handled separately.';
 }
 
 function Field({ label, type = 'text', value, onChange, required }) {
