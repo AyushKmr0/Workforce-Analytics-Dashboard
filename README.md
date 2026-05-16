@@ -39,7 +39,7 @@ Create `backend/.env` with values like:
 SECRET_KEY=change-this
 ORACLE_USER=your_oracle_user
 ORACLE_PASSWORD=your_oracle_password
-ORACLE_DSN=localhost:1521/xe
+ORACLE_DSN=localhost:1521/orclpdb
 ADMIN_SEED_EMAIL=admin@example.com
 ADMIN_SEED_PASSWORD=admin123
 ADMIN_SEED_NAME=System Admin
