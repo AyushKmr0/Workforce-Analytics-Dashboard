@@ -12,15 +12,21 @@ from app.schemas.leave_schema import leave_payload
 from app.schemas.profile_change_schema import profile_change_payload
 from app.schemas.user_schema import department_payload, user_payload
 from app.services.activity_service import log_activity
-from app.services.analytics_service import get_analytics_payload
+from app.services.analytics_service import get_analytics_payload, requested_analytics_days
 from app.services.attendance_report_service import attendance_report, requested_days
 from app.services.file_service import save_upload
 from app.services.profile_change_service import apply_profile_changes
+from app.services.work_report_service import requested_days as requested_work_days
+from app.services.work_report_service import team_work_report
 from app.utils.dates import parse_date
 from app.utils.security import require_checked_in_for_change, role_required
 
 
 admin_bp = Blueprint("api_admin", __name__)
+
+
+def clean_optional(value):
+    return (value or "").strip() or None
 
 
 @admin_bp.before_request
@@ -34,7 +40,8 @@ def require_attendance_for_changes():
 @role_required("ADMIN")
 def analytics():
     department_id = request.args.get("department_id", type=int)
-    return jsonify(get_analytics_payload(department_id))
+    days = requested_analytics_days(request.args.get("days"))
+    return jsonify(get_analytics_payload(department_id, days))
 
 
 @admin_bp.get("/employees")
@@ -42,9 +49,14 @@ def analytics():
 def employees():
     search = (request.args.get("search") or "").strip().lower()
     department_id = request.args.get("department_id", type=int)
+    role = (request.args.get("role") or "").strip().upper()
     query = User.query.filter(User.id != current_user.id)
     if department_id:
         query = query.filter(User.department_id == department_id)
+    if role:
+        if role not in {"EMPLOYEE", "HR", "ADMIN"}:
+            return jsonify({"message": "Invalid role filter."}), 400
+        query = query.filter(User.role == role)
     if search:
         like = f"%{search}%"
         query = query.filter(
@@ -71,9 +83,27 @@ def employees():
 @role_required("ADMIN")
 def create_employee():
     data = request.form if request.form else (request.get_json(silent=True) or {})
-    required = ["name", "email", "password"]
+    required = [
+        "name",
+        "email",
+        "password",
+        "role",
+        "department_id",
+        "salary",
+        "phone_number",
+        "status",
+        "date_of_birth",
+        "joining_date",
+        "address",
+        "city",
+        "district",
+        "state",
+        "pincode",
+    ]
     if any(not data.get(field) for field in required):
-        return jsonify({"message": "Name, email, and password are required."}), 400
+        return jsonify({"message": "All employee fields are required."}), 400
+    if not request.files.get("profile_image") or not request.files.get("document"):
+        return jsonify({"message": "Profile image and employee document are required."}), 400
     if User.query.filter_by(email=data["email"].strip().lower()).first():
         return jsonify({"message": "Email already exists."}), 409
     try:
@@ -88,8 +118,12 @@ def create_employee():
             role=(data.get("role") or "EMPLOYEE").upper(),
             salary=salary,
             department_id=data.get("department_id") or None,
-            phone_number=data.get("phone_number") or None,
-            address=data.get("address") or None,
+            phone_number=clean_optional(data.get("phone_number")),
+            address=clean_optional(data.get("address")),
+            city=clean_optional(data.get("city")),
+            district=clean_optional(data.get("district")),
+            state=clean_optional(data.get("state")),
+            pincode=clean_optional(data.get("pincode")),
             date_of_birth=parse_date(data.get("date_of_birth")),
             joining_date=parse_date(data.get("joining_date")),
             status=(data.get("status") or "ACTIVE").upper(),
@@ -102,14 +136,12 @@ def create_employee():
 
     user.set_password(data["password"])
     try:
-        if request.files.get("profile_image"):
-            upload = save_upload(request.files["profile_image"], "profiles")
-            user.profile_image = upload["file_url"]
+        upload = save_upload(request.files["profile_image"], "profiles")
+        user.profile_image = upload["file_url"]
         db.session.add(user)
         db.session.flush()
-        if request.files.get("document"):
-            upload = save_upload(request.files["document"], "documents")
-            db.session.add(Document(user_id=user.id, file_url=upload["file_url"], file_type=upload["file_type"]))
+        upload = save_upload(request.files["document"], "documents")
+        db.session.add(Document(user_id=user.id, file_url=upload["file_url"], file_type=upload["file_type"]))
     except ValueError as exc:
         db.session.rollback()
         return jsonify({"message": str(exc)}), 400
@@ -132,8 +164,18 @@ def update_employee(user_id):
         user.role = (data.get("role") or user.role).upper()
         user.salary = Decimal(str(data.get("salary", user.salary)))
         user.department_id = data.get("department_id", user.department_id) or None
-        user.phone_number = data.get("phone_number", user.phone_number)
-        user.address = data.get("address", user.address)
+        if "phone_number" in data:
+            user.phone_number = clean_optional(data.get("phone_number"))
+        if "address" in data:
+            user.address = clean_optional(data.get("address"))
+        if "city" in data:
+            user.city = clean_optional(data.get("city"))
+        if "district" in data:
+            user.district = clean_optional(data.get("district"))
+        if "state" in data:
+            user.state = clean_optional(data.get("state"))
+        if "pincode" in data:
+            user.pincode = clean_optional(data.get("pincode"))
         user.date_of_birth = parse_date(data.get("date_of_birth")) if "date_of_birth" in data else user.date_of_birth
         user.joining_date = parse_date(data.get("joining_date")) if "joining_date" in data else user.joining_date
         user.status = (data.get("status") or user.status).upper()
@@ -195,6 +237,35 @@ def create_department():
     return jsonify({"department": department_payload(department)}), 201
 
 
+@admin_bp.put("/departments/<int:department_id>")
+@role_required("ADMIN")
+def update_department(department_id):
+    department = Department.query.get_or_404(department_id)
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"message": "Department name is required."}), 400
+    if Department.query.filter(Department.name == name, Department.id != department.id).first():
+        return jsonify({"message": "Department already exists."}), 409
+    old_name = department.name
+    department.name = name
+    log_activity(current_user.id, "UPDATE_DEPARTMENT", f"{old_name} -> {name}")
+    db.session.commit()
+    return jsonify({"department": department_payload(department)})
+
+
+@admin_bp.delete("/departments/<int:department_id>")
+@role_required("ADMIN")
+def delete_department(department_id):
+    department = Department.query.get_or_404(department_id)
+    name = department.name
+    User.query.filter(User.department_id == department.id).update({"department_id": None})
+    log_activity(current_user.id, "DELETE_DEPARTMENT", name)
+    db.session.delete(department)
+    db.session.commit()
+    return jsonify({"message": "Department deleted."})
+
+
 @admin_bp.get("/leaves")
 @role_required("ADMIN")
 def leaves():
@@ -230,6 +301,17 @@ def attendance():
     return jsonify(attendance_report(users, days))
 
 
+@admin_bp.get("/work-reports")
+@role_required("ADMIN")
+def work_reports():
+    days = requested_work_days(request.args.get("days"))
+    department_id = request.args.get("department_id", type=int)
+    users = User.query.filter(User.status == "ACTIVE", User.role == "EMPLOYEE")
+    if department_id:
+        users = users.filter(User.department_id == department_id)
+    return jsonify(team_work_report(users, days))
+
+
 @admin_bp.patch("/leaves/<int:leave_id>")
 @role_required("ADMIN")
 def review_leave(leave_id):
@@ -262,7 +344,13 @@ def review_profile_change_request(request_id):
     request_item = ProfileChangeRequest.query.filter_by(id=request_id, status="PENDING_ADMIN").first_or_404()
     decision = ((request.get_json(silent=True) or {}).get("status") or "").upper()
     if decision == "APPROVED":
-        apply_profile_changes(request_item.user, profile_change_payload(request_item)["requested_changes"], parse_date)
+        changes = profile_change_payload(request_item)["requested_changes"]
+        if "email" in changes:
+            incoming_email = (changes.get("email") or "").strip().lower()
+            if User.query.filter(User.email == incoming_email, User.id != request_item.user_id).first():
+                return jsonify({"message": "Email already exists."}), 409
+            changes["email"] = incoming_email
+        apply_profile_changes(request_item.user, changes, parse_date)
         request_item.status = "APPROVED"
         request_item.admin_reviewed_by = current_user.id
     elif decision == "REJECTED":

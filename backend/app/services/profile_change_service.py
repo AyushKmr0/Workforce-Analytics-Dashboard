@@ -3,10 +3,16 @@ import json
 
 PROFILE_FIELDS = {
     "name",
+    "email",
     "phone_number",
     "address",
+    "city",
+    "district",
+    "state",
+    "pincode",
     "date_of_birth",
     "joining_date",
+    "profile_image",
 }
 
 

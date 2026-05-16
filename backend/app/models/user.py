@@ -7,7 +7,7 @@ class User(db.Model):
     __tablename__ = "users"
 
     id = db.Column(db.Integer, db.Identity(start=1), primary_key=True)
-    employee_code = db.Column(db.String(6), unique=True, nullable=False, index=True)
+    employee_code = db.Column(db.String(8), unique=True, nullable=False, index=True)
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     password = db.Column(db.String(255), nullable=False)
@@ -16,6 +16,10 @@ class User(db.Model):
     role = db.Column(db.String(20), nullable=False, index=True)
     phone_number = db.Column(db.String(30))
     address = db.Column(db.String(500))
+    city = db.Column(db.String(80))
+    district = db.Column(db.String(80))
+    state = db.Column(db.String(80))
+    pincode = db.Column(db.String(12))
     date_of_birth = db.Column(db.Date)
     joining_date = db.Column(db.Date)
     profile_image = db.Column(db.String(500))

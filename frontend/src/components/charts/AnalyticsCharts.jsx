@@ -12,14 +12,18 @@ import { Bar, Doughnut } from 'react-chartjs-2';
 ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Legend, Tooltip);
 
 const colors = ['#2563eb', '#0ea5e9', '#059669', '#d97706', '#dc2626', '#64748b'];
+const orderedLabels = {
+  'Salary Distribution': ['0-25k', '25k-50k', '50k-100k', '100k-150k', '150k+'],
+};
 
 function datasetFromMap(map, label) {
+  const labels = orderedLabels[label] || Object.keys(map || {});
   return {
-    labels: Object.keys(map || {}),
+    labels,
     datasets: [
       {
         label,
-        data: Object.values(map || {}),
+        data: labels.map((item) => Number(map?.[item] || 0)),
         backgroundColor: colors,
         borderRadius: 8,
       },

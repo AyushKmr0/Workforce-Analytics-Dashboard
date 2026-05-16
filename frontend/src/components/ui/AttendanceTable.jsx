@@ -19,7 +19,10 @@ export function AttendanceTable({ records = [], title = 'Attendance Records' }) 
           <tbody className="divide-y divide-slate-100">
             {records.map((record) => (
               <tr key={record.id}>
-                <td className="px-4 py-3">{record.employee?.name || 'Me'}</td>
+                <td className="px-4 py-3">
+                  <div className="font-semibold">{record.employee?.name || 'Me'}</div>
+                  {record.employee && <div className="text-xs font-bold text-slate-500">ID: {record.employee.employee_code || record.user_id}</div>}
+                </td>
                 <td className="px-4 py-3">{record.date}</td>
                 <td className="px-4 py-3">{record.check_in || 'Pending'}</td>
                 <td className="px-4 py-3">{record.check_out || 'Pending'}</td>
