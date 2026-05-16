@@ -81,7 +81,3 @@ npm run build
 - Analytics dashboards and team reports
 - Employee work report submission
 
-## Notes
-
-- Do not commit `backend/.env`, `frontend/node_modules`, `frontend/dist`, or Python cache folders.
-- The backend creates database tables and seeds the admin account on startup when configured.
