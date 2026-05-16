@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { DocumentsTable } from '../../components/ui/DocumentsTable';
+import { Modal } from '../../components/ui/Modal';
 import { useToast } from '../../context/ToastContext';
 import { useAsync } from '../../hooks/useAsync';
 import { hrService } from '../../services/hrService';
@@ -7,6 +8,7 @@ import { hrService } from '../../services/hrService';
 export function HRDocuments() {
   const { showToast } = useToast();
   const [refresh, setRefresh] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const documents = useAsync(hrService.documents, [refresh]);
 
   const deleteDocument = async (document) => {
@@ -25,7 +27,21 @@ export function HRDocuments() {
         <p className="text-sm font-bold uppercase tracking-wider text-blue-600">Documents</p>
         <h2 className="text-3xl font-black tracking-tight text-slate-950">Department Documents</h2>
       </div>
-      <DocumentsTable documents={documents.data?.items || []} title="Department Documents" onDelete={deleteDocument} />
+      <DocumentsTable documents={documents.data?.items || []} title="Department Documents" onDelete={setDeleteTarget} />
+      {deleteTarget && (
+        <Modal
+          title="Delete Document"
+          onClose={() => setDeleteTarget(null)}
+          footer={(
+            <>
+              <button className="btn-secondary" onClick={() => setDeleteTarget(null)} type="button">Cancel</button>
+              <button className="btn-primary bg-rose-600 hover:bg-rose-700" onClick={() => { deleteDocument(deleteTarget); setDeleteTarget(null); }} type="button">Delete</button>
+            </>
+          )}
+        >
+          <p className="text-sm font-semibold text-slate-600">Delete this document for {deleteTarget.employee?.name || 'this employee'}?</p>
+        </Modal>
+      )}
     </div>
   );
 }

@@ -1,23 +1,32 @@
+from decimal import Decimal, InvalidOperation
+
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import current_user
 from sqlalchemy import asc, desc, func, or_
 
 from extensions import db
-from app.models import Attendance, Document, Leave, ProfileChangeRequest, User
+from app.models import Attendance, Department, Document, Leave, ProfileChangeRequest, User
 from app.schemas.attendance_schema import attendance_payload
 from app.schemas.document_schema import document_payload
 from app.schemas.leave_schema import leave_payload
 from app.schemas.profile_change_schema import profile_change_payload
 from app.schemas.user_schema import user_payload
 from app.services.activity_service import log_activity
-from app.services.analytics_service import get_analytics_payload
+from app.services.analytics_service import get_analytics_payload, requested_analytics_days
 from app.services.attendance_report_service import attendance_report, requested_days
+from app.services.file_service import save_upload
+from app.services.profile_change_service import apply_profile_changes
 from app.services.work_report_service import requested_days as requested_work_days
 from app.services.work_report_service import team_work_report
+from app.utils.dates import parse_date
 from app.utils.security import require_checked_in_for_change, role_required
 
 
 hr_bp = Blueprint("api_hr", __name__)
+
+
+def clean_optional(value):
+    return (value or "").strip() or None
 
 
 @hr_bp.before_request
@@ -30,7 +39,8 @@ def require_attendance_for_changes():
 @hr_bp.get("/analytics")
 @role_required("HR")
 def analytics():
-    return jsonify(get_analytics_payload(current_user.department_id))
+    days = requested_analytics_days(request.args.get("days"))
+    return jsonify(get_analytics_payload(current_user.department_id, days))
 
 
 @hr_bp.get("/employees")
@@ -63,6 +73,71 @@ def employees():
             "pages": result.pages,
         }
     )
+
+
+@hr_bp.post("/employees")
+@role_required("HR")
+def create_employee():
+    if not current_user.department_id:
+        return jsonify({"message": "HR account must be assigned to a department before creating employees."}), 400
+    data = request.form if request.form else (request.get_json(silent=True) or {})
+    required = [
+        "name",
+        "email",
+        "password",
+        "salary",
+        "phone_number",
+        "date_of_birth",
+        "joining_date",
+        "address",
+        "city",
+        "district",
+        "state",
+        "pincode",
+    ]
+    if any(not clean_optional(data.get(field)) for field in required):
+        return jsonify({"message": "All employee fields are required."}), 400
+    if not request.files.get("profile_image") or not request.files.get("document"):
+        return jsonify({"message": "Profile image and employee document are required."}), 400
+    email = data["email"].strip().lower()
+    if User.query.filter_by(email=email).first():
+        return jsonify({"message": "Email already exists."}), 409
+    try:
+        department = db.session.get(Department, current_user.department_id)
+        user = User(
+            employee_code=User.generate_employee_code(department.name if department else None),
+            name=data["name"].strip(),
+            email=email,
+            role="EMPLOYEE",
+            salary=Decimal(str(data.get("salary"))),
+            department_id=current_user.department_id,
+            phone_number=clean_optional(data.get("phone_number")),
+            address=clean_optional(data.get("address")),
+            city=clean_optional(data.get("city")),
+            district=clean_optional(data.get("district")),
+            state=clean_optional(data.get("state")),
+            pincode=clean_optional(data.get("pincode")),
+            date_of_birth=parse_date(data.get("date_of_birth"), required=True),
+            joining_date=parse_date(data.get("joining_date"), required=True),
+            status="ACTIVE",
+        )
+    except (InvalidOperation, ValueError):
+        return jsonify({"message": "Invalid employee payload."}), 400
+
+    user.set_password(data["password"])
+    try:
+        profile_upload = save_upload(request.files["profile_image"], "profiles")
+        user.profile_image = profile_upload["file_url"]
+        db.session.add(user)
+        db.session.flush()
+        document_upload = save_upload(request.files["document"], "documents")
+        db.session.add(Document(user_id=user.id, file_url=document_upload["file_url"], file_type=document_upload["file_type"]))
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"message": str(exc)}), 400
+    log_activity(current_user.id, "CREATE_DEPARTMENT_USER", f"Created {user.email}")
+    db.session.commit()
+    return jsonify({"user": user_payload(user)}), 201
 
 
 @hr_bp.get("/leaves")
@@ -180,7 +255,14 @@ def review_profile_change_request(request_id):
     )
     decision = ((request.get_json(silent=True) or {}).get("status") or "").upper()
     if decision == "APPROVED":
-        request_item.status = "PENDING_ADMIN"
+        changes = profile_change_payload(request_item)["requested_changes"]
+        if "email" in changes:
+            incoming_email = (changes.get("email") or "").strip().lower()
+            if User.query.filter(User.email == incoming_email, User.id != request_item.user_id).first():
+                return jsonify({"message": "Email already exists."}), 409
+            changes["email"] = incoming_email
+        apply_profile_changes(request_item.user, changes, parse_date)
+        request_item.status = "APPROVED"
         request_item.hr_reviewed_by = current_user.id
     elif decision == "REJECTED":
         request_item.status = "REJECTED"

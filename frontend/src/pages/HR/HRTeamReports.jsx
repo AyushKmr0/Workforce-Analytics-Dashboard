@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { Modal } from '../../components/ui/Modal';
 import { StatCard } from '../../components/ui/StatCard';
+import { WorkReportDetails } from '../../components/ui/WorkReportDetails';
 import { useAsync } from '../../hooks/useAsync';
 import { hrService } from '../../services/hrService';
 
@@ -13,6 +15,7 @@ const reportRanges = [
 
 export function HRTeamReports() {
   const [workDays, setWorkDays] = useState(1);
+  const [selectedReport, setSelectedReport] = useState(null);
   const workReports = useAsync(() => hrService.workReports({ days: workDays }), [workDays]);
 
   return (
@@ -50,7 +53,7 @@ export function HRTeamReports() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {(workReports.data?.items || []).map((report) => (
-                <tr key={report.id}>
+                <tr key={report.id} className="cursor-pointer transition hover:bg-blue-50/50" onClick={() => setSelectedReport(report)}>
                   <td className="px-4 py-3 font-semibold">{report.employee?.name}</td>
                   <td className="px-4 py-3">{report.report_date}</td>
                   <td className="px-4 py-3">{report.completion_percent}%</td>
@@ -63,6 +66,11 @@ export function HRTeamReports() {
           </table>
         </div>
       </section>
+      {selectedReport && (
+        <Modal title="Work Report Details" onClose={() => setSelectedReport(null)}>
+          <WorkReportDetails report={selectedReport} />
+        </Modal>
+      )}
     </div>
   );
 }
