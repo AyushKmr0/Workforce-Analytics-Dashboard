@@ -1,17 +1,23 @@
 import { useState } from 'react';
+import { Modal } from '../../components/ui/Modal';
+import { WorkReportDetails } from '../../components/ui/WorkReportDetails';
 import { useToast } from '../../context/ToastContext';
+import { useAsync } from '../../hooks/useAsync';
 import { employeeService } from '../../services/employeeService';
 
 export function EmployeeWorkReport() {
   const { showToast } = useToast();
+  const [refresh, setRefresh] = useState(0);
   const [message, setMessage] = useState('');
   const [busyAction, setBusyAction] = useState('');
+  const [selectedReport, setSelectedReport] = useState(null);
   const [workReport, setWorkReport] = useState({
     report_date: new Date().toISOString().slice(0, 10),
     completed_work: '',
     pending_work: '',
     completion_percent: 0,
   });
+  const reports = useAsync(employeeService.workReports, [refresh]);
 
   const submitWorkReport = async (event) => {
     event.preventDefault();
@@ -27,6 +33,7 @@ export function EmployeeWorkReport() {
         pending_work: '',
         completion_percent: 0,
       });
+      setRefresh((value) => value + 1);
     } catch (error) {
       const errorMessage = error.response?.data?.message || 'Daily work report failed.';
       setMessage(errorMessage);
@@ -64,6 +71,29 @@ export function EmployeeWorkReport() {
           <button className="btn-primary md:col-span-2" disabled={Boolean(busyAction)}>{busyAction === 'work-report' ? 'Submitting...' : 'Submit Work Report'}</button>
         </form>
       </section>
+      <section className="card p-5">
+        <h3 className="text-lg font-bold text-slate-950">Work Report History</h3>
+        {reports.error && <div className="mt-3 rounded-lg bg-rose-50 p-3 text-sm font-semibold text-rose-700">{reports.error}</div>}
+        <div className="mt-4 divide-y divide-slate-100">
+          {(reports.data?.items || []).map((item) => (
+            <button className="flex w-full items-center justify-between gap-4 py-3 text-left transition hover:bg-blue-50/50" key={item.id} onClick={() => setSelectedReport(item)} type="button">
+              <div>
+                <div className="font-bold text-slate-950">{item.report_date}</div>
+                <div className="line-clamp-1 text-sm text-slate-500">{item.completed_work}</div>
+              </div>
+              <div className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-sm font-bold text-blue-700">
+                {item.completion_percent}%
+              </div>
+            </button>
+          ))}
+          {!(reports.data?.items || []).length && <div className="py-6 text-center text-sm font-semibold text-slate-500">No work report history found.</div>}
+        </div>
+      </section>
+      {selectedReport && (
+        <Modal title="Work Report Details" onClose={() => setSelectedReport(null)}>
+          <WorkReportDetails report={selectedReport} />
+        </Modal>
+      )}
     </div>
   );
 }

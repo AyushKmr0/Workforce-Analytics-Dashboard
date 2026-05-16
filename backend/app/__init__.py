@@ -47,6 +47,7 @@ def create_app():
 
 
 def ensure_api_schema():
+    ensure_user_columns()
     normalize_status_values()
     replace_check_constraint(
         "ATTENDANCE",
@@ -60,6 +61,33 @@ def ensure_api_schema():
         "status IN ('PENDING','APPROVED','REJECTED')",
         ["CK_LEAVE_STATUS", "API_CK_LEAVES_STATUS"],
     )
+
+
+def ensure_user_columns():
+    ensure_column_exists("USERS", "CITY", "VARCHAR2(80)")
+    ensure_column_exists("USERS", "DISTRICT", "VARCHAR2(80)")
+    ensure_column_exists("USERS", "STATE", "VARCHAR2(80)")
+    ensure_column_exists("USERS", "PINCODE", "VARCHAR2(12)")
+    db.session.execute(text("ALTER TABLE users MODIFY employee_code VARCHAR2(8)"))
+    db.session.commit()
+
+
+def ensure_column_exists(table_name, column_name, column_type):
+    exists = db.session.execute(
+        text(
+            """
+            SELECT 1
+            FROM user_tab_columns
+            WHERE table_name = :table_name
+              AND column_name = :column_name
+            """
+        ),
+        {"table_name": table_name, "column_name": column_name},
+    ).first()
+    if exists:
+        return
+    db.session.execute(text(f"ALTER TABLE {table_name.lower()} ADD {column_name.lower()} {column_type}"))
+    db.session.commit()
 
 
 def normalize_status_values():

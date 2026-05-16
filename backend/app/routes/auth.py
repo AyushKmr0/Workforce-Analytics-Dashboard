@@ -2,11 +2,14 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import create_access_token, current_user, jwt_required
+from sqlalchemy.exc import SQLAlchemyError
 
 from extensions import db
 from app.models import User
+from app.schemas.attendance_schema import attendance_payload
 from app.schemas.user_schema import user_payload
 from app.services.activity_service import log_activity
+from app.services.attendance_service import check_in
 
 
 auth_bp = Blueprint("api_auth", __name__)
@@ -22,12 +25,19 @@ def login():
     if not user or not user.check_password(password) or user.status != "ACTIVE":
         return jsonify({"message": "Invalid credentials"}), 401
 
-    user.last_login = datetime.utcnow()
-    log_activity(user.id, "LOGIN", "API login")
-    db.session.commit()
+    try:
+        user.last_login = datetime.utcnow()
+        attendance, checked_in = check_in(user.id)
+        log_activity(user.id, "LOGIN", "API login")
+        if checked_in:
+            log_activity(user.id, "CHECK_IN", "Automatic login check in")
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"message": "Login succeeded, but automatic check-in failed. Please try again."}), 500
 
     token = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
-    return jsonify({"access_token": token, "user": user_payload(user)})
+    return jsonify({"access_token": token, "user": user_payload(user), "attendance": attendance_payload(attendance)})
 
 
 @auth_bp.get("/me")

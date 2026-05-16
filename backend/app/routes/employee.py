@@ -12,6 +12,7 @@ from app.schemas.user_schema import user_payload
 from app.schemas.work_report_schema import work_report_payload
 from app.services.activity_service import log_activity
 from app.services.attendance_service import check_in, check_out, get_today_attendance
+from app.services.analytics_service import get_user_analysis_payload, requested_analytics_days
 from app.services.file_service import save_upload
 from app.services.profile_change_service import clean_profile_changes, encoded_changes
 from app.utils.dates import parse_date
@@ -19,6 +20,37 @@ from app.utils.security import require_checked_in_for_change, role_required
 
 
 employee_bp = Blueprint("api_employee", __name__)
+
+
+def clean_optional(value):
+    return (value or "").strip() or None
+
+
+def profile_request_status_for(user):
+    if user.role == "HR":
+        return "PENDING_ADMIN"
+    return "PENDING_HR"
+
+
+def remove_restricted_profile_fields(user, changes):
+    if user.role != "ADMIN":
+        changes.pop("joining_date", None)
+    return changes
+
+
+def keep_only_changed_profile_fields(user, changes):
+    changed = {}
+    for key, value in changes.items():
+        current_value = getattr(user, key, None)
+        if key in {"date_of_birth", "joining_date"}:
+            current_value = current_value.isoformat() if current_value else ""
+            value = value or ""
+        else:
+            current_value = current_value or ""
+            value = value or ""
+        if str(current_value) != str(value):
+            changed[key] = value
+    return changed
 
 
 @employee_bp.before_request
@@ -36,6 +68,7 @@ def require_attendance_for_changes():
 @employee_bp.get("/dashboard")
 @role_required("EMPLOYEE", "HR", "ADMIN")
 def dashboard():
+    days = requested_analytics_days(request.args.get("days"))
     leaves = (
         Leave.query.filter_by(user_id=current_user.id)
         .order_by(Leave.start_date.desc())
@@ -52,6 +85,7 @@ def dashboard():
         {
             "user": user_payload(current_user),
             "attendance": attendance_payload(get_today_attendance(current_user.id)),
+            "analysis": get_user_analysis_payload(current_user.id, days),
             "leaves": [leave_payload(item) for item in leaves],
             "documents": [document_payload(item) for item in documents],
         }
@@ -67,26 +101,45 @@ def update_profile():
         return jsonify({"message": "Email already exists."}), 409
 
     try:
-        if "name" in data:
-            current_user.name = (data.get("name") or "").strip() or current_user.name
-        current_user.email = incoming_email
-        if "phone_number" in data:
-            current_user.phone_number = (data.get("phone_number") or "").strip() or None
-        if "address" in data:
-            current_user.address = (data.get("address") or "").strip() or None
-        if "date_of_birth" in data:
-            current_user.date_of_birth = parse_date(data.get("date_of_birth")) if data.get("date_of_birth") else None
-        if "joining_date" in data:
-            current_user.joining_date = parse_date(data.get("joining_date")) if data.get("joining_date") else None
+        changes = remove_restricted_profile_fields(current_user, clean_profile_changes(data))
+        if "email" in changes:
+            changes["email"] = incoming_email
+        for key in {"phone_number", "address", "city", "district", "state", "pincode"} & changes.keys():
+            changes[key] = clean_optional(changes.get(key))
+        if "name" in changes:
+            changes["name"] = (changes.get("name") or "").strip() or current_user.name
+        for key in {"date_of_birth", "joining_date"} & changes.keys():
+            parse_date(changes.get(key)) if changes.get(key) else None
         if request.files.get("profile_image"):
             upload = save_upload(request.files["profile_image"], "profiles")
-            current_user.profile_image = upload["file_url"]
+            changes["profile_image"] = upload["file_url"]
+        changes = keep_only_changed_profile_fields(current_user, changes)
     except ValueError as exc:
         return jsonify({"message": str(exc)}), 400
 
-    log_activity(current_user.id, "UPDATE_OWN_PROFILE", "Self-service profile update")
+    if not changes:
+        return jsonify({"message": "No valid profile changes were submitted."}), 400
+
+    if current_user.role == "ADMIN":
+        for key, value in changes.items():
+            if key in {"date_of_birth", "joining_date"}:
+                setattr(current_user, key, parse_date(value) if value else None)
+            else:
+                setattr(current_user, key, value or None)
+        log_activity(current_user.id, "UPDATE_OWN_PROFILE", "Admin self-service profile update")
+        db.session.commit()
+        return jsonify({"user": user_payload(current_user)})
+
+    status = profile_request_status_for(current_user)
+    request_item = ProfileChangeRequest(
+        user_id=current_user.id,
+        requested_changes=encoded_changes(changes),
+        status=status,
+    )
+    db.session.add(request_item)
+    log_activity(current_user.id, "PROFILE_CHANGE_REQUEST", status)
     db.session.commit()
-    return jsonify({"user": user_payload(current_user)})
+    return jsonify({"message": "Profile change request submitted.", "request": profile_change_payload(request_item)})
 
 
 @employee_bp.patch("/password")
@@ -141,9 +194,6 @@ def attendance_history():
 @employee_bp.post("/attendance/check-out")
 @role_required("EMPLOYEE", "HR", "ADMIN")
 def attendance_check_out():
-    data = request.get_json(silent=True) or {}
-    if not current_user.check_password(data.get("password") or ""):
-        return jsonify({"message": "Password verification failed."}), 403
     try:
         record, updated = check_out(current_user.id)
         if not updated:
@@ -245,6 +295,18 @@ def submit_work_report():
     return jsonify({"work_report": work_report_payload(report)}), 201
 
 
+@employee_bp.get("/work-reports")
+@role_required("EMPLOYEE")
+def work_report_history():
+    items = (
+        WorkReport.query.filter_by(user_id=current_user.id)
+        .order_by(WorkReport.report_date.desc(), WorkReport.updated_at.desc())
+        .limit(50)
+        .all()
+    )
+    return jsonify({"items": [work_report_payload(item) for item in items]})
+
+
 @employee_bp.get("/profile-change-requests")
 @role_required("EMPLOYEE", "HR", "ADMIN")
 def my_profile_change_requests():
@@ -260,10 +322,18 @@ def my_profile_change_requests():
 @employee_bp.post("/profile-change-requests")
 @role_required("EMPLOYEE", "HR")
 def submit_profile_change_request():
-    changes = clean_profile_changes(request.get_json(silent=True) or {})
+    changes = remove_restricted_profile_fields(current_user, clean_profile_changes(request.get_json(silent=True) or {}))
     if not changes:
         return jsonify({"message": "No valid profile changes were submitted."}), 400
-    status = "PENDING_ADMIN" if current_user.role == "HR" else "PENDING_HR"
+    if "email" in changes:
+        incoming_email = (changes.get("email") or current_user.email).strip().lower()
+        if User.query.filter(User.email == incoming_email, User.id != current_user.id).first():
+            return jsonify({"message": "Email already exists."}), 409
+        changes["email"] = incoming_email
+    changes = keep_only_changed_profile_fields(current_user, changes)
+    if not changes:
+        return jsonify({"message": "No changed profile fields were submitted."}), 400
+    status = profile_request_status_for(current_user)
     request_item = ProfileChangeRequest(
         user_id=current_user.id,
         requested_changes=encoded_changes(changes),

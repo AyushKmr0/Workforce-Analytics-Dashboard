@@ -8,6 +8,7 @@ import { AdminDocuments } from '../pages/Admin/AdminDocuments';
 import { AdminLeaves } from '../pages/Admin/AdminLeaves';
 import { AdminPeople } from '../pages/Admin/AdminPeople';
 import { AdminProfileRequests } from '../pages/Admin/AdminProfileRequests';
+import { AdminTeamReports } from '../pages/Admin/AdminTeamReports';
 import { AccountActivity } from '../pages/Account/AccountActivity';
 import { AccountDocuments } from '../pages/Account/AccountDocuments';
 import { AccountEditProfile } from '../pages/Account/AccountEditProfile';
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/people" element={<AdminPeople />} />
             <Route path="/admin/attendance" element={<AdminAttendance />} />
+            <Route path="/admin/team-reports" element={<AdminTeamReports />} />
             <Route path="/admin/documents" element={<AdminDocuments />} />
             <Route path="/admin/leaves" element={<AdminLeaves />} />
             <Route path="/admin/profile-requests" element={<AdminProfileRequests />} />
