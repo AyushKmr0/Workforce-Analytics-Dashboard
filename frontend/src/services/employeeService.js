@@ -1,7 +1,7 @@
 import { api } from './api';
 
 export const employeeService = {
-  dashboard: async () => (await api.get('/employee/dashboard')).data,
+  dashboard: async (params = {}) => (await api.get('/employee/dashboard', { params })).data,
   todayAttendance: async () => (await api.get('/employee/attendance/today')).data,
   attendance: async () => (await api.get('/employee/attendance')).data,
   checkIn: async (payload) => (await api.post('/employee/attendance/check-in', payload)).data,
@@ -14,6 +14,7 @@ export const employeeService = {
   },
   deleteDocument: async (id) => (await api.delete(`/employee/documents/${id}`)).data,
   submitWorkReport: async (payload) => (await api.post('/employee/work-reports', payload)).data,
+  workReports: async () => (await api.get('/employee/work-reports')).data,
   updateProfile: async (payload) => {
     const formData = new FormData();
     Object.entries(payload).forEach(([key, value]) => {

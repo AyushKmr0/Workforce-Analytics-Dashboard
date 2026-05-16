@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Modal } from '../../components/ui/Modal';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useToast } from '../../context/ToastContext';
 import { useAsync } from '../../hooks/useAsync';
@@ -7,6 +8,8 @@ import { adminService } from '../../services/adminService';
 export function AdminLeaves() {
   const { showToast } = useToast();
   const [refresh, setRefresh] = useState(0);
+  const [selectedLeave, setSelectedLeave] = useState(null);
+  const [confirmReview, setConfirmReview] = useState(null);
   const leaves = useAsync(() => adminService.leaves(), [refresh]);
 
   const review = async (id, status) => {
@@ -30,20 +33,65 @@ export function AdminLeaves() {
         <div className="divide-y divide-slate-100">
           {(leaves.data?.items || []).map((leave) => (
             <div className="flex flex-wrap items-center justify-between gap-3 py-3" key={leave.id}>
-              <div>
+              <button className="text-left" onClick={() => setSelectedLeave(leave)} type="button">
                 <div className="font-bold">{leave.employee?.name}</div>
+                <div className="text-xs font-bold text-slate-400">ID: {leave.employee?.employee_code || leave.user_id}</div>
                 <div className="text-sm text-slate-500">{leave.leave_type} · {leave.start_date} to {leave.end_date}</div>
-              </div>
+              </button>
               <div className="flex items-center gap-2">
                 <StatusBadge value={leave.status} />
-                {leave.status === 'PENDING' && <button className="btn-secondary" onClick={() => review(leave.id, 'APPROVED')} type="button">Approve</button>}
-                {leave.status === 'PENDING' && <button className="btn-secondary" onClick={() => review(leave.id, 'REJECTED')} type="button">Reject</button>}
+                {leave.status === 'PENDING' && <button className="btn-secondary" onClick={() => setConfirmReview({ leave, status: 'APPROVED' })} type="button">Approve</button>}
+                {leave.status === 'PENDING' && <button className="btn-secondary" onClick={() => setConfirmReview({ leave, status: 'REJECTED' })} type="button">Reject</button>}
               </div>
             </div>
           ))}
           {!(leaves.data?.items || []).length && <div className="py-6 text-center text-sm font-semibold text-slate-500">No leave requests found.</div>}
         </div>
       </section>
+      {selectedLeave && (
+        <Modal title="Leave Request Details" onClose={() => setSelectedLeave(null)}>
+          <LeaveDetails leave={selectedLeave} />
+        </Modal>
+      )}
+      {confirmReview && (
+        <Modal
+          title={`${confirmReview.status === 'APPROVED' ? 'Approve' : 'Reject'} Leave`}
+          onClose={() => setConfirmReview(null)}
+          footer={(
+            <>
+              <button className="btn-secondary" onClick={() => setConfirmReview(null)} type="button">Cancel</button>
+              <button className="btn-primary" onClick={() => { review(confirmReview.leave.id, confirmReview.status); setConfirmReview(null); }} type="button">Confirm</button>
+            </>
+          )}
+        >
+          <LeaveDetails leave={confirmReview.leave} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function LeaveDetails({ leave }) {
+  return (
+    <div className="grid gap-3 text-sm sm:grid-cols-2">
+      <Detail label="Employee" value={leave.employee?.name || '-'} />
+      <Detail label="Employee ID" value={leave.employee?.employee_code || leave.user_id || '-'} />
+      <Detail label="Type" value={leave.leave_type} />
+      <Detail label="Start Date" value={leave.start_date} />
+      <Detail label="End Date" value={leave.end_date} />
+      <Detail label="Status" value={leave.status} />
+      <div className="sm:col-span-2">
+        <Detail label="Reason" value={leave.reason || '-'} />
+      </div>
+    </div>
+  );
+}
+
+function Detail({ label, value }) {
+  return (
+    <div className="rounded-lg bg-slate-50 p-3">
+      <div className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1 break-words font-semibold text-slate-950">{value}</div>
     </div>
   );
 }
