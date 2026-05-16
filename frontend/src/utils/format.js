@@ -1,3 +1,3 @@
 export function formatMoney(value) {
-  return `$${Number(value || 0).toLocaleString()}`;
+  return `Rs ${Number(value || 0).toLocaleString('en-IN')}`;
 }
